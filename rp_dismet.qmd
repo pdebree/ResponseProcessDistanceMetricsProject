@@ -1,0 +1,30 @@
+---
+title: MAIM Final Project
+author: "Pippi de Bree"
+format: pdf
+code-overflow: wrap
+---
+
+```{r, include=FALSE}
+
+library(tidyverse)
+
+
+
+```
+
+
+Things to read/consider before: 
+- https://www.researchgate.net/publication/220868086_A_Similarity_Measure_for_Sequences_of_Categorical_Data_Based_on_the_Ordering_of_Common_Elements
+- https://www.zotero.org/pippidebree/items/P75893RK/reader
+- https://academic.oup.com/jrsssa/article/179/2/481/7068212?login=true
+
+
+Data (Requested Access - Write a little about that): 
+https://sites.google.com/view/dataminingcompetition2019/dataset?authuser=0
+
+
+
+```{r}
+
+```
