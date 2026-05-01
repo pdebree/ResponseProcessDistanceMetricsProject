@@ -8,8 +8,7 @@ code-overflow: wrap
 ```{r, include=FALSE}
 
 library(tidyverse)
-
-
+library(lubridate)
 
 ```
 
@@ -18,6 +17,7 @@ Things to read/consider before:
 - https://www.researchgate.net/publication/220868086_A_Similarity_Measure_for_Sequences_of_Categorical_Data_Based_on_the_Ordering_of_Common_Elements
 - https://www.zotero.org/pippidebree/items/P75893RK/reader
 - https://academic.oup.com/jrsssa/article/179/2/481/7068212?login=true
+- https://www.pnas.org/doi/full/10.1073/pnas.2322973121
 
 
 Data (Requested Access - Write a little about that): 
@@ -26,5 +26,85 @@ https://sites.google.com/view/dataminingcompetition2019/dataset?authuser=0
 
 
 ```{r}
+# data read in 
+d <- read.csv("data/data_a_train.csv")
+
+colnames(d)
+
+cat("Number of Unqiue Students in Dataset:", length(unique(d$STUDENTID)), end="\n")
+cat("Unique Values of \"Block\":", unique(d$Block), end="\n")
+cat("Number of Unique Items:", length(unique(d$AccessionNumber)), end="\n")
+cat("Unique Items:", unique(d$AccessionNumber), sep="\n - ", end="\n")
+cat("Number of Unique Item Types in Dataset:", length(unique(d$ItemType)), end="\n")
+cat("Unique Item Types in Dataset:", unique(d$ItemType), sep="\n - ", end="\n")
+cat("Number of Unique Observables:", length(unique(d$Observable)), end="\n")
+cat("Unique Observables:", unique(d$Observable), sep="\n - ", end="\n")
+cat("Number of Unique ExtentededInfo:",length(unique(d$ExtendedInfo)))
+cat("Number of Unique Event Times:", length(unique(d$EventTime)))
 
 ```
+
+We get seven unique columns: 
+
+- "STUDENTID" - Unique Student Idenifier (1232 unique students)
+- "Block" - Idenitifier for different modeling task (not relevant)
+- "AccessionNumber" - Unique Identifier for Test Items (24 unique items)
+- "ItemType" - Type of Item Question (10 distinct types - listed above)
+- "Observable" - Type of Action that the student took (i.e. this can be considered the tool use variable)
+- "ExtendedInfo" - Details of the action - this seems too fine grained for this work. Mainly it contains information about the logistics of tool use or item (for example `TextToSpeech Read: She records her weekly savings.`). We will not use this. 
+- "EventTime" - Timestamp of when the action was taken (this may be helpful in ensuring that we have a decided order of items.)
+
+
+
+```{r}
+# look a table of items by item types (i.e. how many of each item type are there?)
+d |> count(ItemType, AccessionNumber) 
+```
+
+We see that some of the `ItemType` values are not actually test items - ` BlockReview`, `Help`, `TimeLeftMessage` and `TimeOutMessage` are not actually items and they all map to unique `AccesionNumber` values (`BlockRev`, `HELPMAT8`, `EOSTimeLft`, `SecTimeOut`). As this is not information that is necessary for our purpose we will remove all of these. 
+
+
+A similar thing can be said of the `Observables`, some values are not useful for our analysis. For example `Enter Item` is of little value. Essentially we want to limit these to only the tool uses, so that we can create tool use profiles for the test taker at each item. This will require going into the details of what all of these are.
+
+
+What we ultimately want to create is a dataframe that contains tool use profiles for each student at each item. We then can consider the order of the items when we make this into a sequence of tool use. 
+
+Before we do the necessary cleaning we will look at the general order of the items, as implied by the ordering of the data. 
+
+We will turn event times into an ordering - not all students took the exam at the same time, so really what matters is within a students own time frame, what was the ordering.
+
+```{r}
+# To do this we need the Accesion Number (with the additionals removed) and the event Times. This will likely be overly complex (as students come back to items). But will give us an idea of general structure. 
+
+# get AccesionNumbers and EventTimes, then remove non-item values
+# 
+non_questions <- c("EOSTimeLft", "SecTimeOut", "HELPMAT8", "BlockRev")
+
+cat("Number of AccesionNumber Values after removing the non-item values:", length(unique(d |> select(EventTime, AccessionNumber) |> filter(!AccessionNumber %in% non_questions) |> pull(AccessionNumber))))
+
+# Time points for each item for each student
+d_item_sequence <- d |> select(EventTime, AccessionNumber, STUDENTID) |> 
+    filter(!AccessionNumber %in% non_questions) |> 
+    mutate(EventTime = lubridate::ymd_hms(EventTime)) 
+
+
+# Create index of when each student does an action at each item 
+# I think that the "NextItem" variables etc will make it such that event item visited by 
+# every student will show up. 
+# we remove rows where the previous row is the same accesion number (meaning we only count being in 
+# one item once - there could be multiple actions but in trying to make these sequences of order that 
+# information is not valuable.)
+paths <- d_item_sequence |> group_by(STUDENTID) |> arrange(EventTime, .by_group = TRUE) |> 
+    filter(AccessionNumber != lag(AccessionNumber, default = "")) |>
+    mutate(seq_loc = row_number()) |> summarize(item_path = list(AccessionNumber))
+
+# make actual sequences for each individual 
+
+
+
+
+```
+
+
+
+TextToSpeech Read: She records her weekly savings.
