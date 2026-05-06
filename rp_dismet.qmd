@@ -9,6 +9,11 @@ code-overflow: wrap
 
 library(tidyverse)
 library(lubridate)
+library(glca)
+library(reshape2)
+library(TraMineR)
+library(TraMineRextras)
+library (ggseqplot)
 
 ```
 
@@ -34,13 +39,13 @@ colnames(d)
 cat("Number of Unqiue Students in Dataset:", length(unique(d$STUDENTID)), end="\n")
 cat("Unique Values of \"Block\":", unique(d$Block), end="\n")
 cat("Number of Unique Items:", length(unique(d$AccessionNumber)), end="\n")
-cat("Unique Items:", unique(d$AccessionNumber), sep="\n - ", end="\n")
+cat("Unique Items:", unique(d$AccessionNumber), sep="\n")
 cat("Number of Unique Item Types in Dataset:", length(unique(d$ItemType)), end="\n")
-cat("Unique Item Types in Dataset:", unique(d$ItemType), sep="\n - ", end="\n")
+cat("Unique Item Types in Dataset:", unique(d$ItemType), sep="\n")
 cat("Number of Unique Observables:", length(unique(d$Observable)), end="\n")
-cat("Unique Observables:", unique(d$Observable), sep="\n - ", end="\n")
-cat("Number of Unique ExtentededInfo:",length(unique(d$ExtendedInfo)))
-cat("Number of Unique Event Times:", length(unique(d$EventTime)))
+cat("Unique Observables:", unique(d$Observable), sep="\n")
+cat("Number of Unique ExtentededInfo:",length(unique(d$ExtendedInfo)), end="\n")
+cat("Number of Unique Event Times:", length(unique(d$EventTime)), end="\n")
 
 ```
 
@@ -59,9 +64,10 @@ We get seven unique columns:
 ```{r}
 # look a table of items by item types (i.e. how many of each item type are there?)
 d |> count(ItemType, AccessionNumber) 
+
 ```
 
-We see that some of the `ItemType` values are not actually test items - ` BlockReview`, `Help`, `TimeLeftMessage` and `TimeOutMessage` are not actually items and they all map to unique `AccesionNumber` values (`BlockRev`, `HELPMAT8`, `EOSTimeLft`, `SecTimeOut`). As this is not information that is necessary for our purpose we will remove all of these. 
+We see that some of the `ItemType` values are not actually test items - `BlockReview`, `Help`, `TimeLeftMessage` and `TimeOutMessage` are not actually items and they all map to unique `AccesionNumber` values (`BlockRev`, `HELPMAT8`, `EOSTimeLft`, `SecTimeOut`). As this is not information that is necessary for our purpose we will remove all of these. 
 
 
 A similar thing can be said of the `Observables`, some values are not useful for our analysis. For example `Enter Item` is of little value. Essentially we want to limit these to only the tool uses, so that we can create tool use profiles for the test taker at each item. This will require going into the details of what all of these are.
@@ -78,27 +84,212 @@ We will turn event times into an ordering - not all students took the exam at th
 
 # get AccesionNumbers and EventTimes, then remove non-item values
 # 
-non_questions <- c("EOSTimeLft", "SecTimeOut", "HELPMAT8", "BlockRev")
+non_accession_nos <- c("EOSTimeLft", "SecTimeOut", "HELPMAT8", "BlockRev")
 
-cat("Number of AccesionNumber Values after removing the non-item values:", length(unique(d |> select(EventTime, AccessionNumber) |> filter(!AccessionNumber %in% non_questions) |> pull(AccessionNumber))))
+cat("Number of AccesionNumber Values after removing the non-item values:", length(unique(d |> select(EventTime, AccessionNumber) |> filter(!AccessionNumber %in% non_accession_nos) |> pull(AccessionNumber))))
 
 # Time points for each item for each student
 d_item_sequence <- d |> select(EventTime, AccessionNumber, STUDENTID) |> 
-    filter(!AccessionNumber %in% non_questions) |> 
+    filter(!AccessionNumber %in% non_accession_nos) |> 
     mutate(EventTime = lubridate::ymd_hms(EventTime)) 
-
 
 # Create index of when each student does an action at each item 
 # I think that the "NextItem" variables etc will make it such that event item visited by 
 # every student will show up. 
-# we remove rows where the previous row is the same accesion number (meaning we only count being in 
-# one item once - there could be multiple actions but in trying to make these sequences of order that 
-# information is not valuable.)
-paths <- d_item_sequence |> group_by(STUDENTID) |> arrange(EventTime, .by_group = TRUE) |> 
-    filter(AccessionNumber != lag(AccessionNumber, default = "")) |>
-    mutate(seq_loc = row_number()) |> summarize(item_path = list(AccessionNumber))
+# we remove where (based on the ordering) the AccesionNumber has already been seen. This effectively gives
+# us the order in which students went to new items. This may be a simplification but it makes sense. 
 
-# make actual sequences for each individual 
+paths <- d_item_sequence |> group_by(STUDENTID) |> arrange(EventTime, .by_group = TRUE) |> 
+    filter(!duplicated(AccessionNumber)) |> 
+    mutate(seq_loc = row_number()) |> summarize(item_path = list(AccessionNumber)) |> mutate(path_length = lengths(item_path))
+
+# Plot distibution of items visited
+ggplot(data=paths, aes(x=path_length)) + geom_histogram()
+
+# lets look at the counts of the unique items
+paths |> filter(path_length == 20) |> count(item_path)
+
+# there seems to be some discrepancy but the majority of the students take the same path through the items. So we will use this as the item ordering. 
+test_item_order <- paths |> filter(path_length == 20) |> count(item_path)  |> filter(n > 100)  |> pull(item_path)
+test_item_order <- test_item_order[[1]]
+
+# pull out students who do not have a full sequence or whos order is different (this is too much detail for us to account for - so we just remove them)
+non_complete_students <- paths |> rowwise() |> 
+  filter(!identical(item_path, test_item_order)) |> 
+  ungroup() |> pull(STUDENTID)
+    
+complete_students <- d |> filter(!STUDENTID %in% non_complete_students) |> pull(STUDENTID) |> unique()
+    
+```
+
+
+Now we have the item order of the test! 
+
+A question to ask is whether we only look at students that completed all questions - I think this makes sense. 
+
+Now let's limit the observables to only those that are about tool use. 
+
+```{r}
+# remove non-complete students, non-item ItemTypes,
+d_fp <- d |> filter(!STUDENTID %in% non_complete_students) |> filter(!AccessionNumber %in% non_accession_nos)
+
+# check number of unique STUDENTIDs we find in the data 
+cat("Number of Unique STUDENTID Values After removing non-complete paths:", length(unique(d_fp$STUDENTID)), end="\n")
+cat("Number of Unique AccesionNumbers After removing non-question AccessionNumbers:", length(unique(d_fp$AccessionNumber)), end="\n")
+cat("Number of Unique ItemTypes After removing on-question AccessionNumbers:", length(unique(d_fp$ItemType)), end="\n")
+
+```
+
+
+Now we can start to think about limiting our observables to our tools 
+
+
+```{r}
+
+# First let's get a sense of how much each tool us 
+df <- d_fp %>% 
+  group_by(Observable) %>%
+  summarize(
+    n_items = n_distinct(AccessionNumber),
+    prop = n_items / 20
+  )
+
+print(df, n=100)
+df <- d_fp %>% 
+  group_by(AccessionNumber, Observable) %>%
+  summarize(
+    # Unique people who used THIS observable on THIS item
+    n_people_using_obs = n_distinct(STUDENTID),
+    # The total people from the previous step carries over if we use mean or first
+    prop = n_people_using_obs / 952,
+    .groups = "drop"
+  ) |>  group_by(Observable) %>%
+  summarize(
+    mean_prop_across_items = mean(prop),
+    n_items_with_this_obs = n() # Tells you how many items actually triggered this behavior
+  ) |> arrange(desc(mean_prop_across_items))
+
+cat("\nThese are the Observables we will consider:", sort(unique(d_fp$Observable)), sep="\n")
+
+```
+
+Now let's think about what are definitely tools and what we think are not relevant observables for this work. 
+
+
+Definitely Not Useful (Following Ruiting Visual State of Test is Not Interesting) - (Recieve Focus - too fine for this work)
+"Enter Item", "Next", "Exit Item", "Back", 
+"Increase Zoom", "Decrease Zoom", "Change Theme", "Horizontal Item Scroll", "Vertical Item Scroll", "Hide Timer", "Show Timer", "Click Choice",
+"Click Progress Navigator", "Lose Focus", "Receive Focus", "Clear Answer", "DropChoice", "Math Keypress", "First Text Change", "Move Calculator"
+
+Definitely Tools: 
+"Scratchwork Mode On", "Draw", "Scratchwork Mode Off", "Scratchwork Erase Mode On, "Erase", "Scratchwork Draw Mode On"
+"Open Calculator", "Calculator Buffer", "Close Calculator", "Eliminate Choice", "Scratchwork Highlight Mode On", 
+"Highlight", "TextToSpeech", "Open Equation Editor" "Equation Editor Button", "Close Equation Editor", "Clear Scratchwork"
+
+Now, what is valuable to keep from this shorter list? - Keep this fairly long for now! 
+"Scratchwork Mode On", "Draw", "Scratchwork Erase Mode On", "Erase", "Scratchwork Draw Mode On"
+"Open Calculator",  "Eliminate Choice", "Scratchwork Highlight Mode On", 
+"Highlight", "TextToSpeech", "Equation Editor Button"
+
+
+We remove from the tool use list the following: 
+"Scratchwork Mode Off" - not helpful (inherently captured by the "On")
+"Close Calculator" - not helpful (inherently captured by the "On")
+"Close Equation Editor" - not helpful (inherently captured by the "On")
+"Clear Scratchwork" - not helpful 
+"Calculator Buffer" - not helpful
+"Open Equation Editor" - not helpful
+
+Let's do the actual cleaning. While we do this we don't actually have to worry about the ordering or timing (we will be fairly terse with this). The ordering will be added back later! Structural zeros! We are doing binarized used tool profiles - i.e. we aren't thinking about counts. 
+
+```{r}
+# - "STUDENTID" - Unique Student Idenifier (1232 unique students)
+# - "Block" - Idenitifier for different modeling task (not relevant)
+# - "AccessionNumber" - Unique Identifier for Test Items (24 unique items)
+# - "ItemType" - Type of Item Question (10 distinct types - listed above)
+# - "Observable" - Type of Action that the student took (i.e. this can be considered the tool use variable)
+# - "ExtendedInfo" - Details of the action - this seems too fine grained for this work. Mainly it contains information about the logistics of tool use or item (for example `TextToSpeech Read: She records her weekly savings.`). We will not use this. 
+# - "EventTime" - Timestamp of when the action was taken (this may be helpful in ensuring that we have a decided order of items.)
+
+
+# Do I 
+tool_observables <- c("Scratchwork Mode On", "Draw", "Scratchwork Erase Mode On", "Erase", "Scratchwork Draw Mode On",
+"Open Calculator", "Eliminate Choice", "Scratchwork Highlight Mode On", "Highlight", "TextToSpeech", "Equation Editor Button")
+
+tool_observables_lim <- c("Draw", "Erase", "Open Calculator", "Eliminate Choice", "Highlight", "TextToSpeech", "Equation Editor Button")
+
+# we already have d_fp which contains only full paths for students and AccesionNumbers that make sense
+d_fp <- d_fp |> filter(Observable %in% tool_observables_lim)
+
+```
+
+
+
+Now we are limited to students with full paths, items that are valid questions and observables that are relevant to our work! We now need to make this into a dataframe that we could do analysis on. What we need is a tool profile for every student - item combination. To do this we will make some big jumps. Though there is an inherent sequence in the items, students do not necessarily only follow that sequnece. They may return back to items. It is a simplification but we will ignore this. We will collapse tool use onto the item sequence, even if students came back and used tools that they did not initially use. So essentially, we just look for whether a student used a tool for an item and ignore the ordering of this. We will reintroduce the ordering once we have considered latent profiles for each item. (I know, I know)
+
+```{r}
+
+cat("Number of Unique Combinations before dropping repeated rows:", nrow(d_fp),end="\n")
+cat("Number of Unique Combinations after dropping repeated rows:", nrow(d_fp |> select(STUDENTID, AccessionNumber, Observable) |> unique()), end="\n")
+
+
+d_tools <- expand.grid(STUDENTID = complete_students,
+  AccessionNumber = unique(d_fp$AccessionNumber))
+
+d_obs <- d_fp |> select(STUDENTID, AccessionNumber, Observable) |> unique() |> mutate(val = 1) |> pivot_wider(id_cols=c(STUDENTID, AccessionNumber), names_from="Observable", values_from="val", values_fill = 0) 
+
+
+
+# Now we have created our tool use profiles, it will be interesting to see the frequency of each tool's use
+# We will also consider how often they are used in combination - this may give us an idea of what the tool use profiles will look like
+
+# double check we have the correct number of students and the correct number of items
+cat("Number of Unique STUDENTID Values:", length(unique(d_obs$STUDENTID)), end="\n")
+cat("Number of Unique AccesionNumbers:", length(unique(d_obs$AccessionNumber)), end="\n")
+cat("Number of Unique Combinations:", nrow(d_obs), end="\n")
+
+
+cat("Number of Unique STUDENTID Values:", length(unique(d_tools$STUDENTID)), end="\n")
+cat("Number of Unique AccesionNumbers:", length(unique(d_tools$AccessionNumber)), end="\n")
+cat("Number of Unique Combinations:", nrow(d_tools), end="\n")
+
+
+# Do some analysis across d_obs 
+d_obs |>  select(-c(STUDENTID, AccessionNumber)) |> colMeans()
+
+# The implication here is that for half of the item-student combinations no tool was used - I am suspicious of this but we ride
+# But! There are also strucutral zeros!
+d_tools <- d_tools |> left_join(d_obs, by = join_by(STUDENTID, AccessionNumber), suffix=c("", "")) 
+d_tools[is.na(d_tools)] <- 0
+
+d_tools |>  select(-c(STUDENTID, AccessionNumber)) |> colMeans()
+
+items_tools <- d_tools  |> group_by(AccessionNumber)  |> summarise(across(all_of(tool_observables_lim), mean, na.rm = TRUE)) |> arrange(factor(AccessionNumber, levels = test_item_order))
+
+
+```
+
+
+Slightly worried about how I have defined complete sequences. 
+
+Once tool use profiles are made, consider the frequency with which they appear across the datset - if everybody uses the calculator on every question is it interesting?
+
+
+# PCA 
+
+Before we get into the complexities of the sequences of items, let's look at doing a pca or efa on one of the items.
+
+
+```{r}
+
+# let's just throw everything together to prove that we shouldn't
+
+full_pca <- prcomp(x=d_tools |> select(-STUDENTID, -AccessionNumber), center=TRUE, scale=TRUE)
+
+
+
+# do in loop 
+
 
 
 
@@ -106,5 +297,334 @@ paths <- d_item_sequence |> group_by(STUDENTID) |> arrange(EventTime, .by_group 
 ```
 
 
+Use as justification for individually coding because there are different dimensions across items. 
 
-TextToSpeech Read: She records her weekly savings.
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Latent Classes 
+
+Let's start looking at creating latent classes of the groups for each item 
+
+```{r}
+
+
+# custom function for creating class probabilities plot
+plot_class_probs <- function(glca.fit, item_number) {
+
+  # pull out probability of responding 'yes' 
+  item_probs <- sapply(glca.fit$param$rho$ALL, function(x) x[, 2])
+
+  # class prevalences (in order of class)
+  prevalence <- round(as.numeric(glca.fit$param$gamma), 4)
+  class_labs <- paste0("Class ", seq_along(prevalence), "\n(", prevalence, ")")
+
+  plot_data <- melt(item_probs)
+  colnames(plot_data) <- c("Class", "Use", "PrYes")
+  plot_data$Class <- factor(plot_data$Class, 
+                          levels = unique(plot_data$Class),
+                          labels = class_labs)
+  plot_data$Use <- factor(plot_data$Use, levels = rev(unique(plot_data$Use)))
+
+
+  class_plot <- ggplot(plot_data, aes(x = Use, y = PrYes)) +
+    geom_col(fill = "indianred1", color = "white", width = 0.7) +
+    facet_grid(~ Class) +
+    coord_flip() +
+    # Set specific breaks for 0.5 and 1
+    # We use 'labels' to ensure they display exactly as you want
+    scale_y_continuous(
+      limits = c(0, 1), 
+      breaks = c(0.5, 1),
+      labels = c("0.5", "1")
+    ) +
+    theme_minimal() +
+    labs(
+      x = "Tool Uses",
+      y = "Pr Responds Uses Tool",
+      title = paste0("Item ", item_number, " Latent Classes")
+    ) +
+    theme(
+      # Remove axis ticks
+      axis.ticks = element_blank(),
+      # Remove background grid lines to make the 0.5 and 1 stand out
+      panel.grid.minor = element_blank(),
+      panel.grid.major.x = element_line(color = "gray90"), 
+      # Polish text
+      strip.text = element_text(face = "bold", size = 10),
+      axis.text.y = element_text(size = 8)
+  )
+
+  return(class_plot)
+
+}
+
+cat("AccessionNumbers in Order: ", test_item_order, sep="\n")
+
+# Maybe this is not a great practice but 
+
+fit_glca <- function(test_item) {
+  "function that fits a range of latent classes models and returns the summary fits"
+    
+
+  dt <- d_tools  |> filter(AccessionNumber == test_item)  |> select(-AccessionNumber, -STUDENTID)
+  print(colMeans(dt))
+
+  dt <- dt[, colMeans(dt) != 0]
+
+  # make formula of valid columns
+  f <- as.formula(paste("item(`", paste(colnames(dt), collapse = "`, `"), "`) ~ 1", sep=""))
+    
+  m2 <- glca(f, data = dt, nclass = 2, verbose = F, seed=123)
+  m3 <- glca(f, data = dt, nclass = 3, verbose = F, seed=123)
+  m4 <- glca(f, data = dt, nclass = 4, verbose = F, seed=123)
+  m5 <- glca(f, data = dt, nclass = 5, verbose = F, seed=123)
+  m6 <- glca(f, data = dt, nclass = 6, verbose = F, seed=123)
+
+  summary_fits <- gofglca(m2, m3, m4, m5, m6)
+  print(summary_fits)
+  return(f)
+}
+
+
+
+# Item 1 - This is just ass
+f1_out <- fit_glca(test_item = test_item_order[1])
+b_1 <- d_tools  |> filter(AccessionNumber == test_item_order[1])
+m_i1 <- glca(f1_out, data = b_1, nclass = 2, verbose = F, seed=123)
+summary(m_i1)
+plot_class_probs(m_i1, item_number = 1)
+b_1$b <- rep("N", length(b_1$STUDENTID)) # Assigning everybody no tool use
+
+# Item 2 - 3 Classes
+f2_out <- fit_glca(test_item = test_item_order[2])
+b_2 <- d_tools  |> filter(AccessionNumber == test_item_order[2])
+m_i2 <- glca(f2_out, data = b_2, nclass = 4, verbose = F, seed=123)
+summary(m_i2)
+plot_class_probs(m_i2, item_number = 2)
+b_2$b <- recode(max.col(m_i2$posterior$ALL), `1`="EC", `2`="D", `3`="N", `4`="TS")
+
+
+# Item 3 
+f3_out <- fit_glca(test_item =test_item_order[3])
+b_3 <- d_tools  |> filter(AccessionNumber == test_item_order[3])
+m_i3 <- glca(f3_out, data = b_3, nclass = 3, verbose = F, seed=123)
+summary(m_i3)
+plot_class_probs(m_i3, item_number = 3)
+table(max.col(m_i3$posterior$ALL))
+b_3$b <- recode(max.col(m_i3$posterior$ALL), `1`="N", `2`="EC", `3`="D") # here calculator use is high across the board
+
+# Item 4 
+f4_out <- fit_glca(test_item_order[4])
+b_4 <- d_tools  |> filter(AccessionNumber == test_item_order[4])
+m_i4 <- glca(f4_out, data = b_4, nclass = 3, verbose = F, seed=123)
+summary(m_i4)
+plot_class_probs(m_i4, item_number = 4)
+table(max.col(m_i4$posterior$ALL))
+b_4$b <- recode(max.col(m_i4$posterior$ALL), `1`="N", `2`="C", `3`="D") 
+
+# Item 5 - This one wants 2
+f5_out <- fit_glca(test_item_order[5])
+b_5 <- d_tools  |> filter(AccessionNumber == test_item_order[5])
+m_i5 <- glca(f5_out, data = b_5, nclass = 2, verbose = F, seed=123)
+summary(m_i5)
+plot_class_probs(m_i5, item_number = 5)
+b_5$b <- recode(max.col(m_i5$posterior$ALL), `1`="D", `2`="C") 
+
+# Item 6 - 
+f6_out <- fit_glca(test_item_order[6]) 
+b_6 <-  d_tools  |> filter(AccessionNumber == test_item_order[6])
+m_i6 <- glca(f6_out, data = b_6, nclass = 2, verbose = F, seed=123)
+summary(m_i6)
+plot_class_probs(m_i6, item_number = 6)
+b_6$b <- recode(max.col(m_i6$posterior$ALL), `1`="C", `2`="D") 
+
+# Item 7 
+f7_out <- fit_glca(test_item_order[7])
+b_7 <- d_tools  |> filter(AccessionNumber == test_item_order[7])
+m_i7 <- glca(f7_out, data = b_7, nclass = 3, verbose = F, seed=123)
+summary(m_i7)
+plot_class_probs(m_i7, item_number = 7)
+b_7$b <- recode(max.col(m_i7$posterior$ALL), `1`="N", `2`="EC", `3`="D") 
+
+# Item 8 - bit unsure of this one
+f8_out <- fit_glca(test_item_order[8])
+b_8 <- d_tools  |> filter(AccessionNumber == test_item_order[8])
+m_i8 <- glca(f8_out, data = b_8 , nclass = 2, verbose = F, seed=123)
+summary(m_i8)
+plot_class_probs(m_i8, item_number=8)
+b_8$b <- recode(max.col(m_i8$posterior$ALL), `1`="C", `2`="D") 
+
+# Item 9 - bit unsure of this one
+f9_out <- fit_glca(test_item_order[9])
+b_9 <- d_tools  |> filter(AccessionNumber == test_item_order[9])
+m_i9 <- glca(f9_out, data = b_9, nclass = 3, verbose = F, seed=123)
+summary(m_i9)
+plot_class_probs(m_i9, item_number = 9)
+b_9$b <- recode(max.col(m_i9$posterior$ALL), `1`="C", `2`="TS", `3`="D") 
+
+
+# Item 10 
+f10_out <- fit_glca(test_item_order[10])
+b_10 <- d_tools  |> filter(AccessionNumber == test_item_order[10])
+m_i10 <- glca(f10_out, data = b_10, nclass = 3, verbose = F, seed=123)
+summary(m_i10)
+plot_class_probs(m_i10, item_number = 10)
+b_10$b <- recode(max.col(m_i10$posterior$ALL), `1`="N", `2`="EE", `3`="D") 
+
+
+# Item 11
+f11_out <- fit_glca(test_item_order[11])
+b_11 <- d_tools  |> filter(AccessionNumber == test_item_order[11])
+m_i11 <- glca(f11_out, data = b_11, nclass = 2, verbose = F, seed=123)
+summary(m_i11)
+plot_class_probs(m_i11, item_number = 11)
+b_11$b <- recode(max.col(m_i11$posterior$ALL), `1`="C", `2`="D") 
+
+# Item 12
+f12_out <- fit_glca(test_item_order[12])
+b_12 <-  d_tools  |> filter(AccessionNumber == test_item_order[12])
+m_i12 <- glca(f12_out, data = b_12, nclass = 4, verbose = F, seed=123)
+summary(m_i12)
+plot_class_probs(m_i12, item_number = 12)
+b_12$b <- recode(max.col(m_i12$posterior$ALL), `1`="C", `2`="N", `3` = "D", `4`="EC") 
+
+# Item 13
+f13_out <- fit_glca(test_item_order[13])
+b_13 <- d_tools  |> filter(AccessionNumber == test_item_order[13])
+m_i13 <- glca(f13_out, data = b_13, nclass = 2, verbose = F, seed=123)
+summary(m_i13)
+plot_class_probs(m_i13, item_number = 13)
+b_13$b <- recode(max.col(m_i13$posterior$ALL), `1`="N", `2`="D") 
+
+# Item 14
+f14_out <- fit_glca(test_item_order[14])
+b_14 <- d_tools  |> filter(AccessionNumber == test_item_order[14])
+m_i14 <- glca(f14_out, data = b_14, nclass = 2, verbose = F, seed=123)
+summary(m_i14)
+plot_class_probs(m_i14, item_number = 14)
+b_14$b <- recode(max.col(m_i14$posterior$ALL), `1`="C", `2`="D") 
+
+# Item 15
+f15_out <- fit_glca(test_item_order[15])
+b_15 <- d_tools  |> filter(AccessionNumber == test_item_order[15])
+m_i15 <- glca(f15_out, data = b_15, nclass = 3, verbose = F, seed=123)
+summary(m_i15)
+plot_class_probs(m_i15, item_number = 15)
+b_15$b <- recode(max.col(m_i15$posterior$ALL), `1`="C", `2`="D", `3`="N") 
+
+# Iyem 16
+f16_out <- fit_glca(test_item_order[16])
+b_16 <- d_tools  |> filter(AccessionNumber == test_item_order[16])
+m_i16 <- glca(f16_out, data = b_16, nclass = 4, verbose = F, seed=123)
+summary(m_i16)
+plot_class_probs(m_i16, item_number = 16)
+b_16$b <- recode(max.col(m_i16$posterior$ALL), `1`="TS", `2`="H", `3`="N", `4`="D") 
+
+# Item 17 
+f17_out <- fit_glca(test_item_order[17])
+b_17 <- d_tools  |> filter(AccessionNumber == test_item_order[17])
+m_i17 <- glca(f17_out, data = b_17, nclass = 4, verbose = F, seed=123)
+summary(m_i17)
+plot_class_probs(m_i17, item_number = 17)
+b_17$b <- recode(max.col(m_i17$posterior$ALL), `1`="TS", `2`="H", `3`="N", `4`="D") 
+
+# Item 18 
+f18_out <- fit_glca(test_item_order[18])
+b_18 <-  d_tools  |> filter(AccessionNumber == test_item_order[18])
+m_i18 <- glca(f18_out, data = b_18, nclass = 3, verbose = F, seed=123)
+summary(m_i18)
+plot_class_probs(m_i18, item_number = 18)
+b_18$b <- recode(max.col(m_i18$posterior$ALL), `1`="N", `2`="EC", `3`="D") 
+
+# Item 19 
+f19_out <- fit_glca(test_item_order[19])
+b_19 <-  d_tools  |> filter(AccessionNumber == test_item_order[19])
+m_i19 <- glca(f19_out, data = b_19, nclass = 3, verbose = F, seed=123)
+summary(m_i19)
+plot_class_probs(m_i19, item_number = 19)
+b_19$b <- recode(max.col(m_i19$posterior$ALL), `1`="N", `2`="D", `3`="C") 
+
+# Item 20 
+f20_out <- fit_glca(test_item_order[20])
+b_20 <- d_tools  |> filter(AccessionNumber == test_item_order[20])
+m_i20 <- glca(f20_out, data = b_20, nclass = 3, verbose = F, seed=123)
+summary(m_i20)
+plot_class_probs(m_i20, item_number = 20)
+b_20$b <- recode(max.col(m_i20$posterior$ALL), `1`="N", `2`="D", `3`="C") 
+```
+
+Can I just have everyone in the same class for the first one - We will have all of the profiles start with the same general use item, because of the badness of the first fit. I think this will likely be the result of some sort of test adjustment. 
+
+Generally use BIC less because we want more profiles!
+
+I am being really generous with the number of classes intentionally
+
+Think about higher calculator use items - if something is the same level across everything that's an item thing (i.e. calculator level the same across three things)
+
+
+```{r}
+# Now I make the sequences dataframe from these behavioral objects!
+
+# make lists of STUDENTID and behavioral code
+b_list <- list(b_1, b_2, b_3, b_4, b_5, b_6, b_7, b_8, b_9, b_10, b_11, b_12, b_13, b_14, b_15, b_16, b_17, b_18, b_19, b_20)
+b_list <- lapply(b_list, function(x) x[, c("STUDENTID", "b"), drop = FALSE])
+
+# combine to one dataset
+b <- b_list |>  imap(~ rename_with(.x, function(col) paste0(col, "_", .y), -STUDENTID)) |> reduce(left_join, by="STUDENTID")
+
+```
+
+
+Yay! Sequences!
+
+Let's use the TraMineR package to look at them a little bit!
+
+
+```{r}
+# As a reminder our unique codes are: 
+cat("Unique Behavioral Codes:", unique(unlist(b |> select(-STUDENTID))))
+
+b.scodes <- c("N", "EC", "D", "C", "TS", "EE", "H")
+b.labels <- c("None", "EliminateChoice", "Draw", "Calculator", "TexttoSpeech", "EquationEditor", "Highlight")
+
+b.seq <- seqdef(b, 2:21, alphabet = b.scodes, states=b.scodes, labels=b.labels)
+costs.b <- seqcost(b.seq, method = "INDELSLOG", with.missing = FALSE)
+
+# Substitution matrix (for transition rates)
+submat   <- seqsubm(b.seq, method= "TRATE")
+submat.2 <- submat
+submat.2[] <- 1
+diag(submat.2) <- 0
+
+# TraMineR is great for visualizing sequences!
+seqIplot(b.seq)
+seqfplot(b.seq)
+seqdplot(b.seq)
+
+# These plots will be more useful once we have clusterings going on - but for now it is fairly clear that we have a majority non-tool use crowd!  
+
+```
+
+For the most part we see very 
+
+
+We will consider three ways of considering the differences between these sequences. First, we consider using only our behavioral profiles (i.e. the encoded behavioral states from out latent class analysis). This will allow us to consider the efficacy of a few difference distance metrics known and used in life course analysis. It will also be interesting to consider how the form of the sequences play into this. 
+
+
+
+
+
+```{r}
+
+```
