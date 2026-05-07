@@ -13,7 +13,15 @@ library(glca)
 library(reshape2)
 library(TraMineR)
 library(TraMineRextras)
-library (ggseqplot)
+library(ggseqplot)
+library(psych)
+library(cluster)
+library(fclust)
+library(fpc)
+library(ggdendro)
+library(FactoMineR)
+library(factoextra)
+library(ProcData)
 
 ```
 
@@ -211,18 +219,12 @@ Let's do the actual cleaning. While we do this we don't actually have to worry a
 # - "ExtendedInfo" - Details of the action - this seems too fine grained for this work. Mainly it contains information about the logistics of tool use or item (for example `TextToSpeech Read: She records her weekly savings.`). We will not use this. 
 # - "EventTime" - Timestamp of when the action was taken (this may be helpful in ensuring that we have a decided order of items.)
 
-
-# Do I 
-tool_observables <- c("Scratchwork Mode On", "Draw", "Scratchwork Erase Mode On", "Erase", "Scratchwork Draw Mode On",
-"Open Calculator", "Eliminate Choice", "Scratchwork Highlight Mode On", "Highlight", "TextToSpeech", "Equation Editor Button")
-
-tool_observables_lim <- c("Draw", "Erase", "Open Calculator", "Eliminate Choice", "Highlight", "TextToSpeech", "Equation Editor Button")
+tool_observables <- c("Draw", "Erase", "Open Calculator", "Eliminate Choice", "Highlight", "TextToSpeech", "Equation Editor Button")
 
 # we already have d_fp which contains only full paths for students and AccesionNumbers that make sense
-d_fp <- d_fp |> filter(Observable %in% tool_observables_lim)
+d_fp <- d_fp |> filter(Observable %in% tool_observables)
 
 ```
-
 
 
 Now we are limited to students with full paths, items that are valid questions and observables that are relevant to our work! We now need to make this into a dataframe that we could do analysis on. What we need is a tool profile for every student - item combination. To do this we will make some big jumps. Though there is an inherent sequence in the items, students do not necessarily only follow that sequnece. They may return back to items. It is a simplification but we will ignore this. We will collapse tool use onto the item sequence, even if students came back and used tools that they did not initially use. So essentially, we just look for whether a student used a tool for an item and ignore the ordering of this. We will reintroduce the ordering once we have considered latent profiles for each item. (I know, I know)
@@ -232,13 +234,10 @@ Now we are limited to students with full paths, items that are valid questions a
 cat("Number of Unique Combinations before dropping repeated rows:", nrow(d_fp),end="\n")
 cat("Number of Unique Combinations after dropping repeated rows:", nrow(d_fp |> select(STUDENTID, AccessionNumber, Observable) |> unique()), end="\n")
 
-
 d_tools <- expand.grid(STUDENTID = complete_students,
   AccessionNumber = unique(d_fp$AccessionNumber))
 
 d_obs <- d_fp |> select(STUDENTID, AccessionNumber, Observable) |> unique() |> mutate(val = 1) |> pivot_wider(id_cols=c(STUDENTID, AccessionNumber), names_from="Observable", values_from="val", values_fill = 0) 
-
-
 
 # Now we have created our tool use profiles, it will be interesting to see the frequency of each tool's use
 # We will also consider how often they are used in combination - this may give us an idea of what the tool use profiles will look like
@@ -264,8 +263,56 @@ d_tools[is.na(d_tools)] <- 0
 
 d_tools |>  select(-c(STUDENTID, AccessionNumber)) |> colMeans()
 
-items_tools <- d_tools  |> group_by(AccessionNumber)  |> summarise(across(all_of(tool_observables_lim), mean, na.rm = TRUE)) |> arrange(factor(AccessionNumber, levels = test_item_order))
+items_tools <- d_tools  |> group_by(AccessionNumber)  |> summarise(across(all_of(tool_observables), mean, na.rm = TRUE)) |> arrange(factor(AccessionNumber, levels = test_item_order))
 
+
+uu_tools <- d_tools |> pivot_longer(cols=3:9, names_to="Tool", values_to="Uses") |> group_by(AccessionNumber, Tool) |> summarize(times_used = sum(Uses)) |> filter(Tool == "Equation Editor Button") |> 
+  mutate(AccessionNumber = factor(AccessionNumber, levels=test_item_order),
+  order_index = match(AccessionNumber, test_item_order)
+  ) |> 
+  arrange(order_index)
+
+
+uu_tools <- left_join(uu_tools, d  |> distinct(AccessionNumber, ItemType), by="AccessionNumber")
+
+
+
+d |> distinct(AccessionNumber, ItemType) |>  
+  mutate(AccessionNumber = factor(AccessionNumber, levels=test_item_order),
+  order_index = match(AccessionNumber, test_item_order)) |> arrange(order_index)
+
+```
+
+
+Tool data Visualizations 
+
+
+```{r}
+
+# Item tool proportion matrix 
+item_tool <- d_tools |> pivot_longer(cols=3:9, names_to="tool", values_to="used") |> select(-STUDENTID) |> group_by(AccessionNumber, tool) |> summarize(prop_used = mean(used)) |> ungroup()
+item_tool$AccessionNumber <- factor(item_tool$AccessionNumber, levels = test_item_order, labels=0:19)
+
+item_tool <- item_tool |> filter(AccessionNumber != 0)
+
+pdf("plots/ItemTool.pdf",width=9,height=7)
+ggplot(item_tool, aes(y=tool, x=AccessionNumber, fill=prop_used)) + geom_tile() + labs(x="Test Item", y="Tools", title="Proportion of Tools Used Across Test", fill="Proportion")
+dev.off()
+
+# Student-tool use distribution 
+# number of different tools a student used
+students_unique <- d_tools |> pivot_longer(cols=3:9, names_to="tool", values_to="used") |> group_by(STUDENTID, tool) |> summarize(used_tool = ifelse(sum(used) > 0, 1, 0)) |> group_by(STUDENTID) |> summarize(no_tools_used=sum(used_tool))
+
+pdf("plots/StuNumTools.pdf",width=9,height=7)
+ggplot(students_unique, aes(x=no_tools_used)) + geom_histogram() + labs(x="Number of Unique Tools Used Across Test", y="Count of Students", title="Distribution of Unique Tool Use")
+dev.off()
+
+students_total <- d_tools |> pivot_longer(cols=3:9, names_to="tool", values_to="used") |> group_by(STUDENTID) |> summarize(no_times_tool_used=sum(used))
+
+# number of times a student used a tool
+pdf("plots/StuTotalTools.pdf",width=9,height=7)
+ggplot(students_total, aes(x=no_times_tool_used)) + geom_histogram() + labs(x="Number of Times A Student Used Any Tool Across Test", y="Count of Students", title="Distribution of Unique Tool Use")
+dev.off()
 
 ```
 
@@ -275,37 +322,74 @@ Slightly worried about how I have defined complete sequences.
 Once tool use profiles are made, consider the frequency with which they appear across the datset - if everybody uses the calculator on every question is it interesting?
 
 
-# PCA 
+# EFA 
 
-Before we get into the complexities of the sequences of items, let's look at doing a pca or efa on one of the items.
-
+Before we get into the complexities of the sequences of items, let's look at doing a efa on one of the items. We can't do the full dataset and have logical understanding of 
 
 ```{r}
 
-# let's just throw everything together to prove that we shouldn't
+# Before we do an item-by-item factor analysis let's look at the full dataset - this may give us an understanding of the differences in the number of 
 
-full_pca <- prcomp(x=d_tools |> select(-STUDENTID, -AccessionNumber), center=TRUE, scale=TRUE)
+item6_resp <- d_tools |> filter(AccessionNumber == test_item_order[7]) |> select(-STUDENTID, -AccessionNumber)
+
+efa_i6_3 <- fa(item6_resp, nfactors = 3, rotate = 'oblimin')
+
+prop_var_i6 <- data.frame(prop_var = efa_i6_3$Vaccounted["Proportion Var", ], eigen= efa_i6_3$e.values[1:3]) |> rownames_to_column("factor")
+
+pdf("plots/ScreeEig_i6.pdf",width=8,height=6)
+ggplot(data=prop_var_i6, aes(x=reorder(factor, -eigen), y=eigen)) + geom_col(fill="steelblue") + 
+  labs(x="Factor", y="Eigenvalue", title="Eigenvalues by Factors - Item 6")
+dev.off()
+
+
+item7_resp <- d_tools |> filter(AccessionNumber == test_item_order[8]) |> select(-STUDENTID, -AccessionNumber, -`Eliminate Choice`)
+
+efa_i7_3 <- fa(item7_resp, nfactors = 3, rotate = 'oblimin')
+prop_var_i7 <- data.frame(prop_var = efa_i7_3$Vaccounted["Proportion Var", ], eigen= efa_i7_3$e.values[1:3]) |> rownames_to_column("factor")
+
+pdf("plots/ScreeEig_i7.pdf",width=8,height=6)
+ggplot(data=prop_var_i7, aes(x=reorder(factor, -eigen), y=eigen)) + geom_col(fill="steelblue") + 
+  labs(x="Factor", y="Eigenvalue", title="Eigenvalues by Factors - Item 7")
+dev.off()
 
 
 
-# do in loop 
+# Item 6 Factor Loadings 
+i6_loadings <- as.data.frame(unclass(efa_i6_3$loadings))
+i6_loadings$Variable <- rownames(i6_loadings)
+
+i6_loadings_m <- melt(i6_loadings, id.vars = "Variable", 
+                   variable.name = "Factor", value.name = "Loading")
+
+pdf("plots/FL_i7.pdf",width=8,height=6)
+ggplot(i6_loadings_m, aes(x = Loading, y = Variable, color = Factor)) +
+  geom_point() +
+  theme_minimal() +
+  geom_vline(xintercept=0, linetype="dotted") +
+  labs(title = "Item 6 Factor Loadings", y = "Loading Strength")
+dev.off()
+
+
+# Item 7 Factor Loadings
+i6_loadings <- as.data.frame(unclass(efa_i6_3$loadings))
+i6_loadings$Variable <- rownames(i6_loadings)
+
+i6_loadings_m <- melt(i6_loadings, id.vars = "Variable", 
+                   variable.name = "Factor", value.name = "Loading")
+
+pdf("plots/FL_i7.pdf",width=8,height=6)
+ggplot(i6_loadings_m, aes(x = Loading, y = Variable, color = Factor)) +
+  geom_point() +
+  theme_minimal() +
+  geom_vline(xintercept=0, linetype="dotted") +
+  labs(title = "Item 6 Factor Loadings", y = "Loading Strength")
+dev.off()
 
 
 
 
 
 ```
-
-
-Use as justification for individually coding because there are different dimensions across items. 
-
-
-
-
-
-
-
-
 
 
 
@@ -403,7 +487,9 @@ f1_out <- fit_glca(test_item = test_item_order[1])
 b_1 <- d_tools  |> filter(AccessionNumber == test_item_order[1])
 m_i1 <- glca(f1_out, data = b_1, nclass = 2, verbose = F, seed=123)
 summary(m_i1)
+pdf("plots/classes_item1.pdf",width=8,height=6)
 plot_class_probs(m_i1, item_number = 1)
+dev.off()
 b_1$b <- rep("N", length(b_1$STUDENTID)) # Assigning everybody no tool use
 
 # Item 2 - 3 Classes
@@ -411,7 +497,9 @@ f2_out <- fit_glca(test_item = test_item_order[2])
 b_2 <- d_tools  |> filter(AccessionNumber == test_item_order[2])
 m_i2 <- glca(f2_out, data = b_2, nclass = 4, verbose = F, seed=123)
 summary(m_i2)
+pdf("plots/classes_item2.pdf",width=8,height=6)
 plot_class_probs(m_i2, item_number = 2)
+dev.off()
 b_2$b <- recode(max.col(m_i2$posterior$ALL), `1`="EC", `2`="D", `3`="N", `4`="TS")
 
 
@@ -420,7 +508,9 @@ f3_out <- fit_glca(test_item =test_item_order[3])
 b_3 <- d_tools  |> filter(AccessionNumber == test_item_order[3])
 m_i3 <- glca(f3_out, data = b_3, nclass = 3, verbose = F, seed=123)
 summary(m_i3)
+pdf("plots/classes_item3.pdf",width=8,height=6)
 plot_class_probs(m_i3, item_number = 3)
+dev.off()
 table(max.col(m_i3$posterior$ALL))
 b_3$b <- recode(max.col(m_i3$posterior$ALL), `1`="N", `2`="EC", `3`="D") # here calculator use is high across the board
 
@@ -429,7 +519,9 @@ f4_out <- fit_glca(test_item_order[4])
 b_4 <- d_tools  |> filter(AccessionNumber == test_item_order[4])
 m_i4 <- glca(f4_out, data = b_4, nclass = 3, verbose = F, seed=123)
 summary(m_i4)
+pdf("plots/classes_item4.pdf",width=8,height=6)
 plot_class_probs(m_i4, item_number = 4)
+dev.off()
 table(max.col(m_i4$posterior$ALL))
 b_4$b <- recode(max.col(m_i4$posterior$ALL), `1`="N", `2`="C", `3`="D") 
 
@@ -438,7 +530,9 @@ f5_out <- fit_glca(test_item_order[5])
 b_5 <- d_tools  |> filter(AccessionNumber == test_item_order[5])
 m_i5 <- glca(f5_out, data = b_5, nclass = 2, verbose = F, seed=123)
 summary(m_i5)
+pdf("plots/classes_item5.pdf",width=8,height=6)
 plot_class_probs(m_i5, item_number = 5)
+dev.off()
 b_5$b <- recode(max.col(m_i5$posterior$ALL), `1`="D", `2`="C") 
 
 # Item 6 - 
@@ -446,7 +540,9 @@ f6_out <- fit_glca(test_item_order[6])
 b_6 <-  d_tools  |> filter(AccessionNumber == test_item_order[6])
 m_i6 <- glca(f6_out, data = b_6, nclass = 2, verbose = F, seed=123)
 summary(m_i6)
+pdf("plots/classes_item6.pdf",width=8,height=6)
 plot_class_probs(m_i6, item_number = 6)
+dev.off()
 b_6$b <- recode(max.col(m_i6$posterior$ALL), `1`="C", `2`="D") 
 
 # Item 7 
@@ -454,7 +550,9 @@ f7_out <- fit_glca(test_item_order[7])
 b_7 <- d_tools  |> filter(AccessionNumber == test_item_order[7])
 m_i7 <- glca(f7_out, data = b_7, nclass = 3, verbose = F, seed=123)
 summary(m_i7)
+pdf("plots/classes_item7.pdf",width=8,height=6)
 plot_class_probs(m_i7, item_number = 7)
+dev.off()
 b_7$b <- recode(max.col(m_i7$posterior$ALL), `1`="N", `2`="EC", `3`="D") 
 
 # Item 8 - bit unsure of this one
@@ -462,7 +560,9 @@ f8_out <- fit_glca(test_item_order[8])
 b_8 <- d_tools  |> filter(AccessionNumber == test_item_order[8])
 m_i8 <- glca(f8_out, data = b_8 , nclass = 2, verbose = F, seed=123)
 summary(m_i8)
+pdf("plots/classes_item8.pdf",width=8,height=6)
 plot_class_probs(m_i8, item_number=8)
+dev.off()
 b_8$b <- recode(max.col(m_i8$posterior$ALL), `1`="C", `2`="D") 
 
 # Item 9 - bit unsure of this one
@@ -470,7 +570,9 @@ f9_out <- fit_glca(test_item_order[9])
 b_9 <- d_tools  |> filter(AccessionNumber == test_item_order[9])
 m_i9 <- glca(f9_out, data = b_9, nclass = 3, verbose = F, seed=123)
 summary(m_i9)
+pdf("plots/classes_item9.pdf",width=8,height=6)
 plot_class_probs(m_i9, item_number = 9)
+dev.off()
 b_9$b <- recode(max.col(m_i9$posterior$ALL), `1`="C", `2`="TS", `3`="D") 
 
 
@@ -479,7 +581,9 @@ f10_out <- fit_glca(test_item_order[10])
 b_10 <- d_tools  |> filter(AccessionNumber == test_item_order[10])
 m_i10 <- glca(f10_out, data = b_10, nclass = 3, verbose = F, seed=123)
 summary(m_i10)
+pdf("plots/classes_item10.pdf",width=8,height=6)
 plot_class_probs(m_i10, item_number = 10)
+dev.off()
 b_10$b <- recode(max.col(m_i10$posterior$ALL), `1`="N", `2`="EE", `3`="D") 
 
 
@@ -488,7 +592,9 @@ f11_out <- fit_glca(test_item_order[11])
 b_11 <- d_tools  |> filter(AccessionNumber == test_item_order[11])
 m_i11 <- glca(f11_out, data = b_11, nclass = 2, verbose = F, seed=123)
 summary(m_i11)
+pdf("plots/classes_item11.pdf",width=8,height=6)
 plot_class_probs(m_i11, item_number = 11)
+dev.off()
 b_11$b <- recode(max.col(m_i11$posterior$ALL), `1`="C", `2`="D") 
 
 # Item 12
@@ -496,7 +602,9 @@ f12_out <- fit_glca(test_item_order[12])
 b_12 <-  d_tools  |> filter(AccessionNumber == test_item_order[12])
 m_i12 <- glca(f12_out, data = b_12, nclass = 4, verbose = F, seed=123)
 summary(m_i12)
+pdf("plots/classes_item12.pdf",width=8,height=6)
 plot_class_probs(m_i12, item_number = 12)
+dev.off()
 b_12$b <- recode(max.col(m_i12$posterior$ALL), `1`="C", `2`="N", `3` = "D", `4`="EC") 
 
 # Item 13
@@ -504,7 +612,9 @@ f13_out <- fit_glca(test_item_order[13])
 b_13 <- d_tools  |> filter(AccessionNumber == test_item_order[13])
 m_i13 <- glca(f13_out, data = b_13, nclass = 2, verbose = F, seed=123)
 summary(m_i13)
+pdf("plots/classes_item13.pdf",width=8,height=6)
 plot_class_probs(m_i13, item_number = 13)
+dev.off()
 b_13$b <- recode(max.col(m_i13$posterior$ALL), `1`="N", `2`="D") 
 
 # Item 14
@@ -512,7 +622,9 @@ f14_out <- fit_glca(test_item_order[14])
 b_14 <- d_tools  |> filter(AccessionNumber == test_item_order[14])
 m_i14 <- glca(f14_out, data = b_14, nclass = 2, verbose = F, seed=123)
 summary(m_i14)
+pdf("plots/classes_item14.pdf",width=8,height=6)
 plot_class_probs(m_i14, item_number = 14)
+dev.off()
 b_14$b <- recode(max.col(m_i14$posterior$ALL), `1`="C", `2`="D") 
 
 # Item 15
@@ -520,7 +632,9 @@ f15_out <- fit_glca(test_item_order[15])
 b_15 <- d_tools  |> filter(AccessionNumber == test_item_order[15])
 m_i15 <- glca(f15_out, data = b_15, nclass = 3, verbose = F, seed=123)
 summary(m_i15)
+pdf("plots/classes_item15.pdf",width=8,height=6)
 plot_class_probs(m_i15, item_number = 15)
+dev.off()
 b_15$b <- recode(max.col(m_i15$posterior$ALL), `1`="C", `2`="D", `3`="N") 
 
 # Iyem 16
@@ -528,7 +642,9 @@ f16_out <- fit_glca(test_item_order[16])
 b_16 <- d_tools  |> filter(AccessionNumber == test_item_order[16])
 m_i16 <- glca(f16_out, data = b_16, nclass = 4, verbose = F, seed=123)
 summary(m_i16)
+pdf("plots/classes_item16.pdf",width=8,height=6)
 plot_class_probs(m_i16, item_number = 16)
+dev.off()
 b_16$b <- recode(max.col(m_i16$posterior$ALL), `1`="TS", `2`="H", `3`="N", `4`="D") 
 
 # Item 17 
@@ -536,7 +652,9 @@ f17_out <- fit_glca(test_item_order[17])
 b_17 <- d_tools  |> filter(AccessionNumber == test_item_order[17])
 m_i17 <- glca(f17_out, data = b_17, nclass = 4, verbose = F, seed=123)
 summary(m_i17)
+pdf("plots/classes_item17.pdf",width=8,height=6)
 plot_class_probs(m_i17, item_number = 17)
+dev.off()
 b_17$b <- recode(max.col(m_i17$posterior$ALL), `1`="TS", `2`="H", `3`="N", `4`="D") 
 
 # Item 18 
@@ -544,7 +662,9 @@ f18_out <- fit_glca(test_item_order[18])
 b_18 <-  d_tools  |> filter(AccessionNumber == test_item_order[18])
 m_i18 <- glca(f18_out, data = b_18, nclass = 3, verbose = F, seed=123)
 summary(m_i18)
+pdf("plots/classes_item18.pdf",width=8,height=6)
 plot_class_probs(m_i18, item_number = 18)
+dev.off()
 b_18$b <- recode(max.col(m_i18$posterior$ALL), `1`="N", `2`="EC", `3`="D") 
 
 # Item 19 
@@ -552,7 +672,9 @@ f19_out <- fit_glca(test_item_order[19])
 b_19 <-  d_tools  |> filter(AccessionNumber == test_item_order[19])
 m_i19 <- glca(f19_out, data = b_19, nclass = 3, verbose = F, seed=123)
 summary(m_i19)
+pdf("plots/classes_item19.pdf",width=8,height=6)
 plot_class_probs(m_i19, item_number = 19)
+dev.off()
 b_19$b <- recode(max.col(m_i19$posterior$ALL), `1`="N", `2`="D", `3`="C") 
 
 # Item 20 
@@ -560,8 +682,12 @@ f20_out <- fit_glca(test_item_order[20])
 b_20 <- d_tools  |> filter(AccessionNumber == test_item_order[20])
 m_i20 <- glca(f20_out, data = b_20, nclass = 3, verbose = F, seed=123)
 summary(m_i20)
+pdf("plots/classes_item20.pdf",width=8,height=6)
 plot_class_probs(m_i20, item_number = 20)
+dev.off()
 b_20$b <- recode(max.col(m_i20$posterior$ALL), `1`="N", `2`="D", `3`="C") 
+
+
 ```
 
 Can I just have everyone in the same class for the first one - We will have all of the profiles start with the same general use item, because of the badness of the first fit. I think this will likely be the result of some sort of test adjustment. 
@@ -576,13 +702,13 @@ Think about higher calculator use items - if something is the same level across 
 ```{r}
 # Now I make the sequences dataframe from these behavioral objects!
 
-# make lists of STUDENTID and behavioral code
-b_list <- list(b_1, b_2, b_3, b_4, b_5, b_6, b_7, b_8, b_9, b_10, b_11, b_12, b_13, b_14, b_15, b_16, b_17, b_18, b_19, b_20)
+# make lists of STUDENTID and behavioral code - start at b_2 because that item is a directions item 
+b_list <- list(b_2, b_3, b_4, b_5, b_6, b_7, b_8, b_9, b_10, b_11, b_12, b_13, b_14, b_15, b_16, b_17, b_18, b_19, b_20)
 b_list <- lapply(b_list, function(x) x[, c("STUDENTID", "b"), drop = FALSE])
 
 # combine to one dataset
-b <- b_list |>  imap(~ rename_with(.x, function(col) paste0(col, "_", .y), -STUDENTID)) |> reduce(left_join, by="STUDENTID")
-
+b <- b_list |> imap(~ rename_with(.x, function(col) paste0(col, "_", .y), -STUDENTID)) |> reduce(left_join, by="STUDENTID")
+b_long <- b |> pivot_longer(cols=2:20, names_to="item", values_to="state")  |> mutate(item = as.integer(substring(item, 3)))
 ```
 
 
@@ -598,7 +724,7 @@ cat("Unique Behavioral Codes:", unique(unlist(b |> select(-STUDENTID))))
 b.scodes <- c("N", "EC", "D", "C", "TS", "EE", "H")
 b.labels <- c("None", "EliminateChoice", "Draw", "Calculator", "TexttoSpeech", "EquationEditor", "Highlight")
 
-b.seq <- seqdef(b, 2:21, alphabet = b.scodes, states=b.scodes, labels=b.labels)
+b.seq <- seqdef(b, 2:20, alphabet = b.scodes, states=b.scodes, labels=b.labels)
 costs.b <- seqcost(b.seq, method = "INDELSLOG", with.missing = FALSE)
 
 # Substitution matrix (for transition rates)
@@ -612,6 +738,16 @@ seqIplot(b.seq)
 seqfplot(b.seq)
 seqdplot(b.seq)
 
+pdf("plots/all_seqs.pdf",width=8,height=6)
+ggseqiplot(b.seq) + 
+  scale_x_discrete(breaks = as.character(1:20)) + labs(title="Tool Use Behavioral Sequences", x="Item", y="Student")
+dev.off()
+
+pdf("plots/item-state-freqs.pdf",width=8,height=6)
+ggseqdplot(b.seq) + 
+  scale_x_discrete(breaks = as.character(1:20)) + labs(title="Relative Frequencies of Behavioral States per Item", x="Item", y="Relative Frequency (n=952)")
+dev.off()
+
 # These plots will be more useful once we have clusterings going on - but for now it is fairly clear that we have a majority non-tool use crowd!  
 
 ```
@@ -623,8 +759,182 @@ We will consider three ways of considering the differences between these sequenc
 
 
 
+```{r}
+
+# Ignore sequencing completley and just look at euclidean distance (manhattan because binary?) between the full vectors of tool profile (i.e. if we weight everything equally we can just treat the tool profile as one long vector)
+
+# need to transform data to one long vector
+tool_vecs <- d_tools |> pivot_wider(id_cols = c(STUDENTID), names_from=AccessionNumber, values_from=3:9) |> select(-STUDENTID) |> as.matrix()
+
+seq_data <- b[, 2:20]
+b_lists <- split(as.matrix(seq_data), row(seq_data))
+names(b_lists) <- b$STUDENTID
+time_list <- lapply(b_lists, function(x) {
+  seq_along(x) 
+})
+
+b.proc <- proc(action_seqs=b_lists, time_seqs = time_list)
+res <- ProcData::seq2feature_mds(b.proc, dist_type = "oss_action", return_dist=TRUE)
+oss_matrix <- res$dist_matrix
+
+
+dist.vec_eucl <- as.matrix(dist(tool_vecs, method="euclidean"))
+dist.vec_man <- as.matrix(dist(tool_vecs, method="manhattan"))
+
+# Simple Hamming Distance 
+dist.ham1 <- seqdist(b.seq, method="HAM") 
+dist.om1 <- seqdist(b.seq, method="OM",indel = costs.b$indel, sm = costs.b$sm, with.missing = TRUE)
+dist.om2 <- seqdist(b.seq, method="OM",indel = 1, sm = submat, with.missing = TRUE)
+dist.lcs1 <- seqdist(b.seq, method="LCS") 
+dist.euclid <- seqdist(b.seq, method="EUCLID")
+dist.chisq <- seqdist(b.seq, method="CHI2")
+dist.osa <- seqdist(b.seq, method="OM", sm="CONSTANT")
+dist.oss <- seq2feature_mds(b_long, )
+dists <- list(`Ham`=dist.ham1,`OM-slog`=dist.om1,`OM-trate`=dist.om2, `LCS`=dist.lcs1, `EUCLID`=dist.euclid, `CHI2`=dist.chisq, `OSA`=dist.osa, `VEC_EUCLID` = dist.vec_eucl, `VEC_MAN` = dist.vec_man)
+
+clustering <- vector("list",9)
+clustering[[1]] <- agnes(dist.ham1, diss=TRUE, method="ward")
+clustering[[2]] <- agnes(dist.om1, diss=TRUE, method="ward")
+clustering[[3]] <- agnes(dist.om2, diss=TRUE, method="ward")
+clustering[[4]] <- agnes(dist.lcs1, diss=TRUE, method="ward")
+clustering[[5]] <- agnes(dist.euclid, diss=TRUE, method="ward")
+clustering[[6]] <- agnes(dist.chisq, diss=TRUE, method="ward")
+clustering[[7]] <- agnes(dist.osa, diss=TRUE, method="ward")
+clustering[[8]] <- agnes(dist.vec_eucl, diss=TRUE, method="ward")
+clustering[[9]] <- agnes(dist.vec_man, diss=TRUE, method="ward")
+
+names(clustering) <- c("Ham", "OM-slog", "OM-trate", "LCS", "EUCLID","CHI2", "OSA", "VEC_EUCLID", "VEC_MAN")
+
+```
+
+Now we have distance 
 
 
 ```{r}
 
+
+CH <- function(k,clusts,dists) { # compute CH crit
+  cl1 <- cutree(clusts, k=k)
+  calinhara(dists,cl1,cn=k)
+}
+
+avg_sil <- function(k,clusts,dists){ # compute ASW
+  cl1 <- cutree(clusts, k=k)
+  ss <- silhouette(cl1, dists)
+  mean(ss[,"sil_width"])
+}
+
+k.values <- 2:10
+for (i in seq_along(clustering)) {
+  avg_sil_values <- map_dbl(k.values, avg_sil,clusts=clustering[[i]],dists=dists[[i]])
+  print(plot(k.values, avg_sil_values, type="b", pch=19, frame=F,
+     xlab="Number of clusters K", ylab="Average Silhouettes",main=names(clustering)[i]))
+}
+for (i in seq_along(clustering)) {
+  CH_values <- map_dbl(k.values, CH, clusts=clustering[[i]],dists=dists[[i]])
+  print(plot(k.values, CH_values, type="b", pch=19, frame=F,
+     xlab="Number of clusters K", ylab="calinhara",main=names(clustering)[i]))
+}
+
+pdf("GoF_all.pdf",width=9,height=7)
+for (i in seq_along(clustering)) {
+  avg_sil_values <- map_dbl(k.values, avg_sil,clusts=clustering[[i]],dists=dists[[i]])
+  if (i==1) plot(k.values, avg_sil_values, type="l", frame=F,
+     xlab="Number of clusters K", ylab="Average Silhouette",lwd=2) #,main="Goodness of Fit")
+  else lines(k.values, avg_sil_values,lty=i,lwd=2)
+}
+legend("topright",lty=c(1,2,3,4,5),lwd=2,legend=names(clustering),bty='n')
+abline(v=c(5,9,11,15),col='lightgrey')
+
+
 ```
+
+
+
+
+Plot clusters by groups 
+ 
+ ```{r}
+
+ggdendrogram(clustering[[1]]$order)
+
+fviz_dend(clustering[[1]])
+fviz_dend(clustering[[2]])
+fviz_dend(clustering[[3]]) 
+fviz_dend(clustering[[4]])
+
+
+plot_clusters <- function(clustering, nClusts, seqs=b.seq) {
+  cl <- cutree(clustering, k=nClusts)
+  b.seq$cl <- cl
+  print(ggseqdplot(b.seq, group=cl) + guides(fill = guide_legend(title.position = "top", label.position = "left", ncol = 1, reverse=T)) + theme(legend.position = c(0.85, 0.2)))
+}
+
+
+for (i in 2:4) {
+  cat("Average Silhouette Value", avg_sil(i, clusts=clustering[[1]],dists=dists[[1]]), end="\n")
+  plot_clusters(clustering[[1]], i)
+}
+
+for (i in 2:6) {
+  cat("Average Silhouette Value", avg_sil(i, clusts=clustering[[2]],dists=dists[[2]]), end="\n")
+  plot_clusters(clustering[[2]], i)
+}
+
+
+for (i in 2:6) {
+  cat("Average Silhouette Value", avg_sil(i, clusts=clustering[[3]],dists=dists[[3]]), end="\n")
+  plot_clusters(clustering[[3]], i)
+}
+
+for (i in 2:6) {
+  cat("Average Silhouette Value", avg_sil(i, clusts=clustering[[4]],dists=dists[[4]]), end="\n")
+  plot_clusters(clustering[[4]], i)
+}
+
+
+for (i in 2:6) {
+  cat("Average Silhouette Value", avg_sil(i, clusts=clustering[[5]],dists=dists[[5]]), end="\n")
+  plot_clusters(clustering[[]], i)
+}
+
+
+for (i in 2:6) {
+  cat("Average Silhouette Value", avg_sil(i, clusts=clustering[[6]],dists=dists[[6]]), end="\n")
+  plot_clusters(clustering[[6]], i)
+}
+
+for (i in 2:6) {
+  cat("Average Silhouette Value", avg_sil(i, clusts=clustering[[7]],dists=dists[[7]]), end="\n")
+  plot_clusters(clustering[[7]], i)
+}
+
+for (i in 2:6) {
+  cat("Average Silhouette Value", avg_sil(i, clusts=clustering[[8]],dists=dists[[8]]), end="\n")
+  plot_clusters(clustering[[8]], i)
+}
+
+for (i in 2:6) {
+  cat("Average Silhouette Value", avg_sil(i, clusts=clustering[[9]],dists=dists[[9]]), end="\n")
+  plot_clusters(clustering[[9]], i)
+}
+
+
+# Make plots for different clustering solutions to compare what is picked up. 
+
+ ```
+
+
+
+
+```{r}
+
+
+
+
+
+```
+
+
+
+
