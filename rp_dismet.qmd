@@ -359,34 +359,33 @@ i6_loadings <- as.data.frame(unclass(efa_i6_3$loadings))
 i6_loadings$Variable <- rownames(i6_loadings)
 
 i6_loadings_m <- melt(i6_loadings, id.vars = "Variable", 
-                   variable.name = "Factor", value.name = "Loading")
+                   variable.name = "Factor", value.name = "Loading") |> arrange(Variable) 
 
-pdf("plots/FL_i7.pdf",width=8,height=6)
-ggplot(i6_loadings_m, aes(x = Loading, y = Variable, color = Factor)) +
+pdf("plots/FL_i6.pdf",width=8,height=6)
+ggplot(i6_loadings_m, aes(x = Loading, y = Variable, color = Factor, group=Factor)) +
   geom_point() +
+  geom_path() + 
   theme_minimal() +
   geom_vline(xintercept=0, linetype="dotted") +
-  labs(title = "Item 6 Factor Loadings", y = "Loading Strength")
+  labs(title = "Item 6 Factor Loadings", y = "Tool", x = "Loading")
 dev.off()
 
 
 # Item 7 Factor Loadings
-i6_loadings <- as.data.frame(unclass(efa_i6_3$loadings))
-i6_loadings$Variable <- rownames(i6_loadings)
+i7_loadings <- as.data.frame(unclass(efa_i7_3$loadings))
+i7_loadings$Variable <- rownames(i7_loadings)
 
-i6_loadings_m <- melt(i6_loadings, id.vars = "Variable", 
-                   variable.name = "Factor", value.name = "Loading")
+i7_loadings_m <- melt(i7_loadings, id.vars = "Variable", 
+                   variable.name = "Factor", value.name = "Loading") |> arrange(Variable)
 
 pdf("plots/FL_i7.pdf",width=8,height=6)
-ggplot(i6_loadings_m, aes(x = Loading, y = Variable, color = Factor)) +
+ggplot(i7_loadings_m, aes(x = Loading, y = Variable, color = Factor, group=Factor)) +
   geom_point() +
+  geom_path() + 
   theme_minimal() +
   geom_vline(xintercept=0, linetype="dotted") +
-  labs(title = "Item 6 Factor Loadings", y = "Loading Strength")
+  labs(title = "Item 7 Factor Loadings", y = "Tool", x = "Loading")
 dev.off()
-
-
-
 
 
 ```
@@ -488,7 +487,7 @@ b_1 <- d_tools  |> filter(AccessionNumber == test_item_order[1])
 m_i1 <- glca(f1_out, data = b_1, nclass = 2, verbose = F, seed=123)
 summary(m_i1)
 pdf("plots/classes_item1.pdf",width=8,height=6)
-plot_class_probs(m_i1, item_number = 1)
+plot_class_probs(m_i1, item_number = 0)
 dev.off()
 b_1$b <- rep("N", length(b_1$STUDENTID)) # Assigning everybody no tool use
 
@@ -498,7 +497,7 @@ b_2 <- d_tools  |> filter(AccessionNumber == test_item_order[2])
 m_i2 <- glca(f2_out, data = b_2, nclass = 4, verbose = F, seed=123)
 summary(m_i2)
 pdf("plots/classes_item2.pdf",width=8,height=6)
-plot_class_probs(m_i2, item_number = 2)
+plot_class_probs(m_i2, item_number = 1)
 dev.off()
 b_2$b <- recode(max.col(m_i2$posterior$ALL), `1`="EC", `2`="D", `3`="N", `4`="TS")
 
@@ -509,7 +508,7 @@ b_3 <- d_tools  |> filter(AccessionNumber == test_item_order[3])
 m_i3 <- glca(f3_out, data = b_3, nclass = 3, verbose = F, seed=123)
 summary(m_i3)
 pdf("plots/classes_item3.pdf",width=8,height=6)
-plot_class_probs(m_i3, item_number = 3)
+plot_class_probs(m_i3, item_number = 2)
 dev.off()
 table(max.col(m_i3$posterior$ALL))
 b_3$b <- recode(max.col(m_i3$posterior$ALL), `1`="N", `2`="EC", `3`="D") # here calculator use is high across the board
@@ -520,7 +519,7 @@ b_4 <- d_tools  |> filter(AccessionNumber == test_item_order[4])
 m_i4 <- glca(f4_out, data = b_4, nclass = 3, verbose = F, seed=123)
 summary(m_i4)
 pdf("plots/classes_item4.pdf",width=8,height=6)
-plot_class_probs(m_i4, item_number = 4)
+plot_class_probs(m_i4, item_number = 3)
 dev.off()
 table(max.col(m_i4$posterior$ALL))
 b_4$b <- recode(max.col(m_i4$posterior$ALL), `1`="N", `2`="C", `3`="D") 
@@ -531,7 +530,7 @@ b_5 <- d_tools  |> filter(AccessionNumber == test_item_order[5])
 m_i5 <- glca(f5_out, data = b_5, nclass = 2, verbose = F, seed=123)
 summary(m_i5)
 pdf("plots/classes_item5.pdf",width=8,height=6)
-plot_class_probs(m_i5, item_number = 5)
+plot_class_probs(m_i5, item_number = 4)
 dev.off()
 b_5$b <- recode(max.col(m_i5$posterior$ALL), `1`="D", `2`="C") 
 
@@ -541,7 +540,7 @@ b_6 <-  d_tools  |> filter(AccessionNumber == test_item_order[6])
 m_i6 <- glca(f6_out, data = b_6, nclass = 2, verbose = F, seed=123)
 summary(m_i6)
 pdf("plots/classes_item6.pdf",width=8,height=6)
-plot_class_probs(m_i6, item_number = 6)
+plot_class_probs(m_i6, item_number = 5)
 dev.off()
 b_6$b <- recode(max.col(m_i6$posterior$ALL), `1`="C", `2`="D") 
 
@@ -551,7 +550,7 @@ b_7 <- d_tools  |> filter(AccessionNumber == test_item_order[7])
 m_i7 <- glca(f7_out, data = b_7, nclass = 3, verbose = F, seed=123)
 summary(m_i7)
 pdf("plots/classes_item7.pdf",width=8,height=6)
-plot_class_probs(m_i7, item_number = 7)
+plot_class_probs(m_i7, item_number = 6)
 dev.off()
 b_7$b <- recode(max.col(m_i7$posterior$ALL), `1`="N", `2`="EC", `3`="D") 
 
@@ -561,7 +560,7 @@ b_8 <- d_tools  |> filter(AccessionNumber == test_item_order[8])
 m_i8 <- glca(f8_out, data = b_8 , nclass = 2, verbose = F, seed=123)
 summary(m_i8)
 pdf("plots/classes_item8.pdf",width=8,height=6)
-plot_class_probs(m_i8, item_number=8)
+plot_class_probs(m_i8, item_number=7)
 dev.off()
 b_8$b <- recode(max.col(m_i8$posterior$ALL), `1`="C", `2`="D") 
 
@@ -571,7 +570,7 @@ b_9 <- d_tools  |> filter(AccessionNumber == test_item_order[9])
 m_i9 <- glca(f9_out, data = b_9, nclass = 3, verbose = F, seed=123)
 summary(m_i9)
 pdf("plots/classes_item9.pdf",width=8,height=6)
-plot_class_probs(m_i9, item_number = 9)
+plot_class_probs(m_i9, item_number = 8)
 dev.off()
 b_9$b <- recode(max.col(m_i9$posterior$ALL), `1`="C", `2`="TS", `3`="D") 
 
@@ -582,7 +581,7 @@ b_10 <- d_tools  |> filter(AccessionNumber == test_item_order[10])
 m_i10 <- glca(f10_out, data = b_10, nclass = 3, verbose = F, seed=123)
 summary(m_i10)
 pdf("plots/classes_item10.pdf",width=8,height=6)
-plot_class_probs(m_i10, item_number = 10)
+plot_class_probs(m_i10, item_number = 9)
 dev.off()
 b_10$b <- recode(max.col(m_i10$posterior$ALL), `1`="N", `2`="EE", `3`="D") 
 
@@ -593,7 +592,7 @@ b_11 <- d_tools  |> filter(AccessionNumber == test_item_order[11])
 m_i11 <- glca(f11_out, data = b_11, nclass = 2, verbose = F, seed=123)
 summary(m_i11)
 pdf("plots/classes_item11.pdf",width=8,height=6)
-plot_class_probs(m_i11, item_number = 11)
+plot_class_probs(m_i11, item_number = 10)
 dev.off()
 b_11$b <- recode(max.col(m_i11$posterior$ALL), `1`="C", `2`="D") 
 
@@ -603,7 +602,7 @@ b_12 <-  d_tools  |> filter(AccessionNumber == test_item_order[12])
 m_i12 <- glca(f12_out, data = b_12, nclass = 4, verbose = F, seed=123)
 summary(m_i12)
 pdf("plots/classes_item12.pdf",width=8,height=6)
-plot_class_probs(m_i12, item_number = 12)
+plot_class_probs(m_i12, item_number = 11)
 dev.off()
 b_12$b <- recode(max.col(m_i12$posterior$ALL), `1`="C", `2`="N", `3` = "D", `4`="EC") 
 
@@ -613,7 +612,7 @@ b_13 <- d_tools  |> filter(AccessionNumber == test_item_order[13])
 m_i13 <- glca(f13_out, data = b_13, nclass = 2, verbose = F, seed=123)
 summary(m_i13)
 pdf("plots/classes_item13.pdf",width=8,height=6)
-plot_class_probs(m_i13, item_number = 13)
+plot_class_probs(m_i13, item_number = 12)
 dev.off()
 b_13$b <- recode(max.col(m_i13$posterior$ALL), `1`="N", `2`="D") 
 
@@ -623,7 +622,7 @@ b_14 <- d_tools  |> filter(AccessionNumber == test_item_order[14])
 m_i14 <- glca(f14_out, data = b_14, nclass = 2, verbose = F, seed=123)
 summary(m_i14)
 pdf("plots/classes_item14.pdf",width=8,height=6)
-plot_class_probs(m_i14, item_number = 14)
+plot_class_probs(m_i14, item_number = 13)
 dev.off()
 b_14$b <- recode(max.col(m_i14$posterior$ALL), `1`="C", `2`="D") 
 
@@ -633,7 +632,7 @@ b_15 <- d_tools  |> filter(AccessionNumber == test_item_order[15])
 m_i15 <- glca(f15_out, data = b_15, nclass = 3, verbose = F, seed=123)
 summary(m_i15)
 pdf("plots/classes_item15.pdf",width=8,height=6)
-plot_class_probs(m_i15, item_number = 15)
+plot_class_probs(m_i15, item_number = 14)
 dev.off()
 b_15$b <- recode(max.col(m_i15$posterior$ALL), `1`="C", `2`="D", `3`="N") 
 
@@ -643,7 +642,7 @@ b_16 <- d_tools  |> filter(AccessionNumber == test_item_order[16])
 m_i16 <- glca(f16_out, data = b_16, nclass = 4, verbose = F, seed=123)
 summary(m_i16)
 pdf("plots/classes_item16.pdf",width=8,height=6)
-plot_class_probs(m_i16, item_number = 16)
+plot_class_probs(m_i16, item_number = 15)
 dev.off()
 b_16$b <- recode(max.col(m_i16$posterior$ALL), `1`="TS", `2`="H", `3`="N", `4`="D") 
 
@@ -653,7 +652,7 @@ b_17 <- d_tools  |> filter(AccessionNumber == test_item_order[17])
 m_i17 <- glca(f17_out, data = b_17, nclass = 4, verbose = F, seed=123)
 summary(m_i17)
 pdf("plots/classes_item17.pdf",width=8,height=6)
-plot_class_probs(m_i17, item_number = 17)
+plot_class_probs(m_i17, item_number = 16)
 dev.off()
 b_17$b <- recode(max.col(m_i17$posterior$ALL), `1`="TS", `2`="H", `3`="N", `4`="D") 
 
@@ -663,7 +662,7 @@ b_18 <-  d_tools  |> filter(AccessionNumber == test_item_order[18])
 m_i18 <- glca(f18_out, data = b_18, nclass = 3, verbose = F, seed=123)
 summary(m_i18)
 pdf("plots/classes_item18.pdf",width=8,height=6)
-plot_class_probs(m_i18, item_number = 18)
+plot_class_probs(m_i18, item_number = 17)
 dev.off()
 b_18$b <- recode(max.col(m_i18$posterior$ALL), `1`="N", `2`="EC", `3`="D") 
 
@@ -673,7 +672,7 @@ b_19 <-  d_tools  |> filter(AccessionNumber == test_item_order[19])
 m_i19 <- glca(f19_out, data = b_19, nclass = 3, verbose = F, seed=123)
 summary(m_i19)
 pdf("plots/classes_item19.pdf",width=8,height=6)
-plot_class_probs(m_i19, item_number = 19)
+plot_class_probs(m_i19, item_number = 18)
 dev.off()
 b_19$b <- recode(max.col(m_i19$posterior$ALL), `1`="N", `2`="D", `3`="C") 
 
@@ -683,7 +682,7 @@ b_20 <- d_tools  |> filter(AccessionNumber == test_item_order[20])
 m_i20 <- glca(f20_out, data = b_20, nclass = 3, verbose = F, seed=123)
 summary(m_i20)
 pdf("plots/classes_item20.pdf",width=8,height=6)
-plot_class_probs(m_i20, item_number = 20)
+plot_class_probs(m_i20, item_number = 19)
 dev.off()
 b_20$b <- recode(max.col(m_i20$posterior$ALL), `1`="N", `2`="D", `3`="C") 
 
@@ -709,6 +708,7 @@ b_list <- lapply(b_list, function(x) x[, c("STUDENTID", "b"), drop = FALSE])
 # combine to one dataset
 b <- b_list |> imap(~ rename_with(.x, function(col) paste0(col, "_", .y), -STUDENTID)) |> reduce(left_join, by="STUDENTID")
 b_long <- b |> pivot_longer(cols=2:20, names_to="item", values_to="state")  |> mutate(item = as.integer(substring(item, 3)))
+
 ```
 
 
@@ -734,29 +734,22 @@ submat.2[] <- 1
 diag(submat.2) <- 0
 
 # TraMineR is great for visualizing sequences!
-seqIplot(b.seq)
-seqfplot(b.seq)
-seqdplot(b.seq)
-
 pdf("plots/all_seqs.pdf",width=8,height=6)
 ggseqiplot(b.seq) + 
-  scale_x_discrete(breaks = as.character(1:20)) + labs(title="Tool Use Behavioral Sequences", x="Item", y="Student")
+  scale_x_discrete(breaks = as.character(1:19)) + labs(title="Tool Use Behavioral Sequences", x="Item", y="Student")
 dev.off()
 
 pdf("plots/item-state-freqs.pdf",width=8,height=6)
 ggseqdplot(b.seq) + 
-  scale_x_discrete(breaks = as.character(1:20)) + labs(title="Relative Frequencies of Behavioral States per Item", x="Item", y="Relative Frequency (n=952)")
+  scale_x_discrete(breaks = as.character(1:19)) + labs(title="Relative Frequencies of Behavioral States per Item", x="Item", y="Relative Frequency (n=952)")
 dev.off()
 
 # These plots will be more useful once we have clusterings going on - but for now it is fairly clear that we have a majority non-tool use crowd!  
 
 ```
 
-For the most part we see very 
-
 
 We will consider three ways of considering the differences between these sequences. First, we consider using only our behavioral profiles (i.e. the encoded behavioral states from out latent class analysis). This will allow us to consider the efficacy of a few difference distance metrics known and used in life course analysis. It will also be interesting to consider how the form of the sequences play into this. 
-
 
 
 ```{r}
@@ -782,17 +775,16 @@ dist.vec_eucl <- as.matrix(dist(tool_vecs, method="euclidean"))
 dist.vec_man <- as.matrix(dist(tool_vecs, method="manhattan"))
 
 # Simple Hamming Distance 
-dist.ham1 <- seqdist(b.seq, method="HAM") 
-dist.om1 <- seqdist(b.seq, method="OM",indel = costs.b$indel, sm = costs.b$sm, with.missing = TRUE)
-dist.om2 <- seqdist(b.seq, method="OM",indel = 1, sm = submat, with.missing = TRUE)
-dist.lcs1 <- seqdist(b.seq, method="LCS") 
 dist.euclid <- seqdist(b.seq, method="EUCLID")
 dist.chisq <- seqdist(b.seq, method="CHI2")
+dist.ham1 <- seqdist(b.seq, method="HAM") 
+dist.lcs1 <- seqdist(b.seq, method="LCS") 
+dist.om1 <- seqdist(b.seq, method="OM",indel = costs.b$indel, sm = costs.b$sm, with.missing = TRUE)
+dist.om2 <- seqdist(b.seq, method="OM",indel = 1, sm = submat, with.missing = TRUE)
 dist.osa <- seqdist(b.seq, method="OM", sm="CONSTANT")
-dist.oss <- seq2feature_mds(b_long, )
 dists <- list(`Ham`=dist.ham1,`OM-slog`=dist.om1,`OM-trate`=dist.om2, `LCS`=dist.lcs1, `EUCLID`=dist.euclid, `CHI2`=dist.chisq, `OSA`=dist.osa, `VEC_EUCLID` = dist.vec_eucl, `VEC_MAN` = dist.vec_man)
 
-clustering <- vector("list",9)
+clustering <- vector("list", 9)
 clustering[[1]] <- agnes(dist.ham1, diss=TRUE, method="ward")
 clustering[[2]] <- agnes(dist.om1, diss=TRUE, method="ward")
 clustering[[3]] <- agnes(dist.om2, diss=TRUE, method="ward")
@@ -813,39 +805,41 @@ Now we have distance
 ```{r}
 
 
-CH <- function(k,clusts,dists) { # compute CH crit
+CH <- function(k,clusts,dists) { 
   cl1 <- cutree(clusts, k=k)
   calinhara(dists,cl1,cn=k)
 }
 
-avg_sil <- function(k,clusts,dists){ # compute ASW
+avg_sil <- function(k,clusts,dists){ 
   cl1 <- cutree(clusts, k=k)
   ss <- silhouette(cl1, dists)
   mean(ss[,"sil_width"])
 }
 
-k.values <- 2:10
-for (i in seq_along(clustering)) {
-  avg_sil_values <- map_dbl(k.values, avg_sil,clusts=clustering[[i]],dists=dists[[i]])
-  print(plot(k.values, avg_sil_values, type="b", pch=19, frame=F,
-     xlab="Number of clusters K", ylab="Average Silhouettes",main=names(clustering)[i]))
-}
-for (i in seq_along(clustering)) {
-  CH_values <- map_dbl(k.values, CH, clusts=clustering[[i]],dists=dists[[i]])
-  print(plot(k.values, CH_values, type="b", pch=19, frame=F,
-     xlab="Number of clusters K", ylab="calinhara",main=names(clustering)[i]))
-}
+k.values <- 2:5
+results <- map_df(seq_along(clustering), function(i) {
+  tibble(
+    K = k.values,
+    Silhouette = map_dbl(k.values, avg_sil, clusts=clustering[[i]], dists=dists[[i]]),
+    CH = map_dbl(k.values, CH, clusts=clustering[[i]], dists=dists[[i]]),
+    Method = names(clustering)[i]
+  )
+})
 
-pdf("GoF_all.pdf",width=9,height=7)
-for (i in seq_along(clustering)) {
-  avg_sil_values <- map_dbl(k.values, avg_sil,clusts=clustering[[i]],dists=dists[[i]])
-  if (i==1) plot(k.values, avg_sil_values, type="l", frame=F,
-     xlab="Number of clusters K", ylab="Average Silhouette",lwd=2) #,main="Goodness of Fit")
-  else lines(k.values, avg_sil_values,lty=i,lwd=2)
-}
-legend("topright",lty=c(1,2,3,4,5),lwd=2,legend=names(clustering),bty='n')
-abline(v=c(5,9,11,15),col='lightgrey')
+pdf("plots/silw.pdf",width=8,height=6)
+ggplot(results, aes(x = K, y = Silhouette, color = Method)) +
+  geom_line() + geom_point() +
+  labs(title = "Average Silhouette Width by Distance Metric", y = "Silhouette", color="Distance Metric", x="Number of Clusters") +
+  theme_minimal()
+dev.off()
 
+# Plot 2: CH Index Comparison
+pdf("plots/calin.pdf",width=8,height=6)
+ggplot(results, aes(x = K, y = CH, color = Method)) +
+  geom_line() + geom_point() +
+  labs(title = "Calinski-Harabasz Index by Distance Metric", y = "CH Score", color="Distance Metric", x="Number of Clusters") +
+  theme_minimal()
+dev.off()
 
 ```
 
@@ -856,84 +850,48 @@ Plot clusters by groups
  
  ```{r}
 
-ggdendrogram(clustering[[1]]$order)
+cl_euclid <- cutree(clustering$EUCLID, k = 3)
+cl_hamming <- cutree(clustering$Ham, k = 3)
+cl_omtrate <- cutree(clustering$`OM-trate`, k=3)
+cl_vec_euclid <- cutree(clustering$VEC_EUCLID, k=3)
+cl_vec_man <- cutree(clustering$VEC_MAN, k=3)
 
-fviz_dend(clustering[[1]])
-fviz_dend(clustering[[2]])
-fviz_dend(clustering[[3]]) 
-fviz_dend(clustering[[4]])
-
-
-plot_clusters <- function(clustering, nClusts, seqs=b.seq) {
-  cl <- cutree(clustering, k=nClusts)
-  b.seq$cl <- cl
-  print(ggseqdplot(b.seq, group=cl) + guides(fill = guide_legend(title.position = "top", label.position = "left", ncol = 1, reverse=T)) + theme(legend.position = c(0.85, 0.2)))
-}
+pdf("plots/cl_euclid.pdf",width=12,height=6)
+ggseqdplot(b.seq, group=cl_euclid) + scale_x_discrete(breaks = as.character(1:19)) + labs(title="Distance between Distributions - Euclidean Distance")
+dev.off()
 
 
-for (i in 2:4) {
-  cat("Average Silhouette Value", avg_sil(i, clusts=clustering[[1]],dists=dists[[1]]), end="\n")
-  plot_clusters(clustering[[1]], i)
-}
-
-for (i in 2:6) {
-  cat("Average Silhouette Value", avg_sil(i, clusts=clustering[[2]],dists=dists[[2]]), end="\n")
-  plot_clusters(clustering[[2]], i)
-}
+pdf("plots/cl_hamming.pdf",width=12,height=6)
+ggseqdplot(b.seq, group=cl_hamming) + labs(title="Hamming Distance")
+dev.off()
 
 
-for (i in 2:6) {
-  cat("Average Silhouette Value", avg_sil(i, clusts=clustering[[3]],dists=dists[[3]]), end="\n")
-  plot_clusters(clustering[[3]], i)
-}
-
-for (i in 2:6) {
-  cat("Average Silhouette Value", avg_sil(i, clusts=clustering[[4]],dists=dists[[4]]), end="\n")
-  plot_clusters(clustering[[4]], i)
-}
+pdf("plots/cl_omtrate.pdf",width=12,height=6)
+ggseqdplot(b.seq, group=cl_omtrate) + labs(title="Optimal Matching with Transition Rate Subsitituion Cost")
+dev.off()
 
 
-for (i in 2:6) {
-  cat("Average Silhouette Value", avg_sil(i, clusts=clustering[[5]],dists=dists[[5]]), end="\n")
-  plot_clusters(clustering[[]], i)
-}
+pdf("plots/cl_vec_euclid.pdf",width=12,height=6)
+ggseqdplot(b.seq, group=cl_vec_euclid) + labs(title="Euclidean Distance between Tool Profiles")
+dev.off()
 
 
-for (i in 2:6) {
-  cat("Average Silhouette Value", avg_sil(i, clusts=clustering[[6]],dists=dists[[6]]), end="\n")
-  plot_clusters(clustering[[6]], i)
-}
+pdf("plots/cl_vec_man.pdf",width=12,height=6)
+ggseqdplot(b.seq, group=cl_vec_man) + labs(title="Manhattan Distance between Tool Profiles")
+dev.off()
 
-for (i in 2:6) {
-  cat("Average Silhouette Value", avg_sil(i, clusts=clustering[[7]],dists=dists[[7]]), end="\n")
-  plot_clusters(clustering[[7]], i)
-}
 
-for (i in 2:6) {
-  cat("Average Silhouette Value", avg_sil(i, clusts=clustering[[8]],dists=dists[[8]]), end="\n")
-  plot_clusters(clustering[[8]], i)
-}
 
-for (i in 2:6) {
-  cat("Average Silhouette Value", avg_sil(i, clusts=clustering[[9]],dists=dists[[9]]), end="\n")
-  plot_clusters(clustering[[9]], i)
-}
+
+
+
+
 
 
 # Make plots for different clustering solutions to compare what is picked up. 
 
  ```
 
-
-
-
-```{r}
-
-
-
-
-
-```
 
 
 
